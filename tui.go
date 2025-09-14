@@ -33,8 +33,8 @@ func (w *Wasmtest) Execute(progress func(msgs ...any)) {
 	ctx, cancel := contextWithTimeout(10 * time.Minute)
 	defer cancel()
 
-	// Run the documented command: GOOS=js GOARCH=wasm go test
-	cmd := exec.CommandContext(ctx, "go", "test")
+	// Run the documented command: GOOS=js GOARCH=wasm go test -v
+	cmd := exec.CommandContext(ctx, "go", "test", "-v")
 	// Set environment variables for the command copied from the parent's env
 	env := os.Environ()
 	// ensure GOOS and GOARCH are set to js/wasm

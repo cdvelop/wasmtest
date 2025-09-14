@@ -14,11 +14,12 @@ import (
 // Defaults: dir="wasm_tests", logger=fmt.Println, timeout=3*time.Minute
 //
 // Examples:
-//   RunTests()                          // uses all defaults
-//   RunTests("./my_tests")              // sets custom directory
-//   RunTests(myLogger)                  // sets custom logger
-//   RunTests(5 * time.Minute)           // sets custom timeout
-//   RunTests("./my_tests", myLogger)    // sets directory and logger
+//
+//	RunTests()                          // uses all defaults
+//	RunTests("./my_tests")              // sets custom directory
+//	RunTests(myLogger)                  // sets custom logger
+//	RunTests(5 * time.Minute)           // sets custom timeout
+//	RunTests("./my_tests", myLogger)    // sets directory and logger
 //
 // Note: if dir is passed as an empty string "" or ".", it defaults to "wasm_tests".
 func RunTests(args ...any) error {
@@ -93,7 +94,12 @@ func RunTests(args ...any) error {
 		lastMessage = msgs
 
 		// Log all messages
-		logger(append([]any{"[WASMTEST]"}, msgs...)...)
+		if len(msgs) > 1 && msgs[0] == "out" {
+			// For test output lines, log without [WASMTEST] prefix for cleaner display
+			logger(msgs[1:]...)
+		} else {
+			logger(append([]any{"[WASMTEST]"}, msgs...)...)
+		}
 
 		// Check for errors
 		if len(msgs) > 0 {
