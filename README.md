@@ -56,11 +56,7 @@ func RunTestsDemo(t *testing.T) {
 }
 ```
 
-- [`RunTests`](wasmtest.go)(dir, logger, timeout): Runs WebAssembly tests in the specified directory
-- `dir`: Path to directory containing test files (e.g., `"./example"`). If `dir` is empty `""` or `"."`,
-  `RunTests` will default to the `wasm_test` directory.
-- `logger`: Optional logger function (pass `nil` for no logging)
-- `timeout`: Maximum time to wait for tests to complete
+- [`RunTests`](RunTests.go)(args ...any): Runs WebAssembly tests with optional arguments by type: string (directory), func(...any) (logger), time.Duration (timeout). Defaults: dir="wasm_tests", logger=fmt.Println, timeout=3*time.Minute
 
 ### Advanced Usage
 

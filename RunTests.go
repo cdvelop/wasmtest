@@ -9,16 +9,33 @@ import (
 	"time"
 )
 
-// RunTests provides a simplified API for running WebAssembly tests.
-// It changes to the specified directory, runs the tests, and returns an error if they fail.
-// The logger parameter is optional (pass nil for no logging).
-// The timeout specifies the maximum time to wait for tests to complete.
+// RunTests provides a simplified variadic API for running WebAssembly tests.
+// It accepts optional arguments of types: string (directory), func(...any) (logger), time.Duration (timeout).
+// Defaults: dir="wasm_tests", logger=fmt.Println, timeout=3*time.Minute
 //
-// Note about the `dir` parameter: if `dir` is passed as an empty string "" or as ".",
-// it will default to the directory name "wasm_test". This makes it convenient to call
-// RunTests("", ...) or RunTests(".", ...) when your WASM test files live under
-// a `wasm_test` directory relative to the caller.
-func RunTests(dir string, logger func(...any), timeout time.Duration) error {
+// Examples:
+//   RunTests()                          // uses all defaults
+//   RunTests("./my_tests")              // sets custom directory
+//   RunTests(myLogger)                  // sets custom logger
+//   RunTests(5 * time.Minute)           // sets custom timeout
+//   RunTests("./my_tests", myLogger)    // sets directory and logger
+//
+// Note: if dir is passed as an empty string "" or ".", it defaults to "wasm_tests".
+func RunTests(args ...any) error {
+	// Parse variadic arguments by type
+	dir := "wasm_tests"
+	logger := func(a ...any) { fmt.Println(a...) }
+	timeout := 3 * time.Minute
+	for _, arg := range args {
+		switch v := arg.(type) {
+		case string:
+			dir = v
+		case func(...any):
+			logger = v
+		case time.Duration:
+			timeout = v
+		}
+	}
 	// Get current directory to restore later
 	originalDir, err := os.Getwd()
 	if err != nil {
@@ -26,9 +43,9 @@ func RunTests(dir string, logger func(...any), timeout time.Duration) error {
 	}
 	defer os.Chdir(originalDir)
 
-	// Normalize dir: if empty or "." use "wasm_test"
+	// Normalize dir: if empty or "." use "wasm_tests"
 	if dir == "" || dir == "." {
-		dir = "wasm_test"
+		dir = "wasm_tests"
 	}
 
 	// Check if directory exists before attempting to change
@@ -75,10 +92,8 @@ func RunTests(dir string, logger func(...any), timeout time.Duration) error {
 		messages = append(messages, msgs)
 		lastMessage = msgs
 
-		// Log all messages if logger is provided
-		if logger != nil {
-			logger(append([]any{"[WASMTEST]"}, msgs...)...)
-		}
+		// Log all messages
+		logger(append([]any{"[WASMTEST]"}, msgs...)...)
 
 		// Check for errors
 		if len(msgs) > 0 {
