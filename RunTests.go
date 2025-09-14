@@ -2,7 +2,6 @@ package wasmtest
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -31,9 +30,34 @@ func RunTests(dir string, logger func(...any), timeout time.Duration) error {
 		dir = "wasm_test"
 	}
 
+	// Check if directory exists before attempting to change
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return fmt.Errorf("test directory %s does not exist", dir)
+	}
+
 	// Change to the test directory
 	if err := os.Chdir(dir); err != nil {
 		return fmt.Errorf("failed to change to directory %s: %v", dir, err)
+	}
+
+	// Check for WebAssembly test files
+	hasWasmTests := false
+	files, err := os.ReadDir(".")
+	if err == nil {
+		for _, file := range files {
+			if strings.HasSuffix(file.Name(), "_test.go") {
+				content, err := os.ReadFile(file.Name())
+				if err == nil && (strings.Contains(string(content), "//go:build js && wasm") ||
+					strings.Contains(string(content), "// +build js,wasm")) {
+					hasWasmTests = true
+					break
+				}
+			}
+		}
+	}
+
+	if !hasWasmTests {
+		return fmt.Errorf("no WebAssembly test files found in directory %s (files must contain '//go:build js && wasm' or '// +build js,wasm')", dir)
 	}
 
 	// Create Wasmtest instance
@@ -42,10 +66,28 @@ func RunTests(dir string, logger func(...any), timeout time.Duration) error {
 	// Collect progress messages to determine success/failure
 	var messages [][]any
 	var lastMessage []any
+	var hasErrors bool
+	var errorMessages []string
 
 	progressFunc := func(msgs ...any) {
 		messages = append(messages, msgs)
 		lastMessage = msgs
+
+		// Log all messages if logger is provided
+		if logger != nil {
+			logger(append([]any{"[WASMTEST]"}, msgs...)...)
+		}
+
+		// Check for errors
+		if len(msgs) > 0 {
+			msgType := fmt.Sprintf("%v", msgs[0])
+			if msgType == "error" || msgType == "err" {
+				hasErrors = true
+				if len(msgs) > 1 {
+					errorMessages = append(errorMessages, fmt.Sprintf("%v", msgs[1]))
+				}
+			}
+		}
 	}
 
 	// Execute tests with timeout context
@@ -64,27 +106,62 @@ func RunTests(dir string, logger func(...any), timeout time.Duration) error {
 	case <-done:
 		// Execution completed
 	case <-ctx.Done():
-		return fmt.Errorf("test execution timed out after %v", timeout)
+		return fmt.Errorf("test execution timed out after %v in directory %s", timeout, dir)
 	}
 
 	// Analyze results from progress messages
+	if len(messages) == 0 {
+		return fmt.Errorf("no progress messages received - possible test execution failure in directory %s", dir)
+	}
+
+	// Check for errors in output
+	if hasErrors {
+		errorSummary := strings.Join(errorMessages, "; ")
+		if errorSummary == "" {
+			errorSummary = "unknown error occurred during test execution"
+		}
+		return fmt.Errorf("WebAssembly test execution failed in directory %s: %s", dir, errorSummary)
+	}
+
 	if len(lastMessage) >= 2 {
 		if lastMessage[0] == "exit" {
 			if lastMessage[1] == "error" {
-				return fmt.Errorf("WASM tests failed: %v", lastMessage[2:])
+				errorDetail := "unknown error"
+				if len(lastMessage) > 2 {
+					errorDetail = fmt.Sprintf("%v", lastMessage[2])
+				}
+				return fmt.Errorf("WebAssembly tests failed in directory %s: %s", dir, errorDetail)
 			} else if lastMessage[1] == "ok" {
 				// Check for PASS in output to confirm success
+				foundPass := false
 				for _, msg := range messages {
 					if len(msg) >= 2 && msg[0] == "out" {
-						if strings.Contains(fmt.Sprintf("%v", msg[1]), "PASS") {
-							return nil // Success
+						output := fmt.Sprintf("%v", msg[1])
+						if strings.Contains(output, "PASS") {
+							foundPass = true
+							break
 						}
 					}
 				}
-				return errors.New("tests completed but no PASS found in output")
+				if foundPass {
+					return nil // Success
+				}
+				return fmt.Errorf("tests completed in directory %s but no PASS found in output - check test implementation", dir)
 			}
 		}
 	}
 
-	return errors.New("unexpected test execution result")
+	// If we reach here, something unexpected happened
+	var debugInfo strings.Builder
+	debugInfo.WriteString(fmt.Sprintf("unexpected test execution result in directory %s\n", dir))
+	debugInfo.WriteString(fmt.Sprintf("Total messages received: %d\n", len(messages)))
+	if len(lastMessage) > 0 {
+		debugInfo.WriteString(fmt.Sprintf("Last message: %v\n", lastMessage))
+	}
+	debugInfo.WriteString("All messages:\n")
+	for i, msg := range messages {
+		debugInfo.WriteString(fmt.Sprintf("  %d: %v\n", i+1, msg))
+	}
+
+	return fmt.Errorf("WebAssembly test execution issue in directory %s:\n%s", dir, debugInfo.String())
 }
