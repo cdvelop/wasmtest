@@ -13,6 +13,8 @@ type Wasmtest struct {
 	log func(...any)
 	// mutex to protect lastOpID
 	lastOpID string
+	// safeLog is a logger that won't panic in goroutines after test completion
+	safeLog func(...any)
 }
 
 // New returns a Wasmtest configured with the provided logger.
@@ -25,7 +27,17 @@ func New(logger func(...any)) *Wasmtest {
 		}
 	}
 
-	w := &Wasmtest{log: logger}
+	// Create a safe logger for background operations that won't panic
+	// after test completion
+	safeLogger := func(args ...any) {
+		defer func() {
+			// Recover from panic if logging after test completion
+			recover()
+		}()
+		logger(args...)
+	}
+
+	w := &Wasmtest{log: logger, safeLog: safeLogger}
 
 	// Perform a synchronous verification/install of wasmbrowsertest so callers
 	// (and integrations like TUI) don't need to call it explicitly.
@@ -35,8 +47,8 @@ func New(logger func(...any)) *Wasmtest {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		if err := w.ensureWasmBrowserTestInstalled(ctx); err != nil {
-			// Log the error via provided logger
-			w.log("ensure wasmbrowsertest failed:", err)
+			// Log the error via safe logger (won't panic after test completion)
+			w.safeLog("ensure wasmbrowsertest failed:", err)
 		}
 	}()
 
@@ -59,12 +71,12 @@ func (w *Wasmtest) ensureWasmBrowserTestInstalled(ctx context.Context) error {
 
 	for _, p := range probes {
 		if _, err := exec.LookPath(p); err == nil {
-			w.log("found", p)
+			w.safeLog("found", p)
 			return nil
 		}
 	}
 
-	w.log("wasmbrowsertest not found in PATH; attempting to install via go install")
+	w.safeLog("wasmbrowsertest not found in PATH; attempting to install via go install")
 
 	// Prepare install command with a timeout to avoid hanging indefinitely.
 	// Use the module path from the docs.
@@ -78,28 +90,28 @@ func (w *Wasmtest) ensureWasmBrowserTestInstalled(ctx context.Context) error {
 	select {
 	case err := <-done:
 		if err != nil {
-			w.log("go install failed:", err)
+			w.safeLog("go install failed:", err)
 			return err
 		}
 	case <-ctx.Done():
 		// kill process if still running
 		_ = installCmd.Process.Kill()
-		w.log("installation context cancelled or deadline exceeded:", ctx.Err())
+		w.safeLog("installation context cancelled or deadline exceeded:", ctx.Err())
 		return ctx.Err()
 	case <-time.After(2 * time.Minute):
 		_ = installCmd.Process.Kill()
-		w.log("installation timed out")
+		w.safeLog("installation timed out")
 		return errors.New("wasmtest: go install timed out")
 	}
 
 	// After install, re-check PATH
 	for _, p := range probes {
 		if _, err := exec.LookPath(p); err == nil {
-			w.log("installed and found", p)
+			w.safeLog("installed and found", p)
 			return nil
 		}
 	}
 
-	w.log("installed but binary still not found in PATH; ensure GOBIN or GOPATH/bin is on PATH")
+	w.safeLog("installed but binary still not found in PATH; ensure GOBIN or GOPATH/bin is on PATH")
 	return errors.New("wasmtest: installed but binary not found in PATH")
 }

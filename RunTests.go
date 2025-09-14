@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 )
@@ -21,7 +22,7 @@ func RunTests(dir string, logger func(...any), timeout time.Duration) error {
 	// Get current directory to restore later
 	originalDir, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("failed to get current directory: %v", err)
+		return fmt.Errorf("❌💥 CRITICAL ERROR: Failed to get current directory\n🔴 Details: %v", err)
 	}
 	defer os.Chdir(originalDir)
 
@@ -32,12 +33,12 @@ func RunTests(dir string, logger func(...any), timeout time.Duration) error {
 
 	// Check if directory exists before attempting to change
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		return fmt.Errorf("test directory %s does not exist", dir)
+		return fmt.Errorf("❌💥 DIRECTORY ERROR: Test directory %s does not exist\n🔴 Please ensure the test directory exists and contains WebAssembly test files", dir)
 	}
 
 	// Change to the test directory
 	if err := os.Chdir(dir); err != nil {
-		return fmt.Errorf("failed to change to directory %s: %v", dir, err)
+		return fmt.Errorf("❌💥 DIRECTORY ERROR: Failed to change to directory %s\n🔴 Details: %v", dir, err)
 	}
 
 	// Check for WebAssembly test files
@@ -57,7 +58,7 @@ func RunTests(dir string, logger func(...any), timeout time.Duration) error {
 	}
 
 	if !hasWasmTests {
-		return fmt.Errorf("no WebAssembly test files found in directory %s (files must contain '//go:build js && wasm' or '// +build js,wasm')", dir)
+		return fmt.Errorf("❌💥 NO TEST FILES: No WebAssembly test files found in directory %s\n🔴 Required: Files must contain '//go:build js && wasm' or '// +build js,wasm'\n💡 Check that your test files have the correct build tags", dir)
 	}
 
 	// Create Wasmtest instance
@@ -68,6 +69,7 @@ func RunTests(dir string, logger func(...any), timeout time.Duration) error {
 	var lastMessage []any
 	var hasErrors bool
 	var errorMessages []string
+	var failedTests []string
 
 	progressFunc := func(msgs ...any) {
 		messages = append(messages, msgs)
@@ -85,6 +87,27 @@ func RunTests(dir string, logger func(...any), timeout time.Duration) error {
 				hasErrors = true
 				if len(msgs) > 1 {
 					errorMessages = append(errorMessages, fmt.Sprintf("%v", msgs[1]))
+				}
+			}
+
+			// Parse test output to find failing tests
+			if msgType == "out" && len(msgs) > 1 {
+				output := fmt.Sprintf("%v", msgs[1])
+				// Look for test failure patterns
+				if strings.Contains(output, "--- FAIL:") {
+					// Extract test name from patterns like:
+					// "--- FAIL: TestFunctionName (0.00s)"
+					// "--- FAIL: TestFunctionName/SubTest (0.00s)"
+					if strings.HasPrefix(output, "--- FAIL: ") {
+						testName := strings.TrimPrefix(output, "--- FAIL: ")
+						// Remove timing info
+						if idx := strings.LastIndex(testName, " ("); idx > 0 {
+							testName = testName[:idx]
+						}
+						if testName != "" && !slices.Contains(failedTests, testName) {
+							failedTests = append(failedTests, testName)
+						}
+					}
 				}
 			}
 		}
@@ -106,12 +129,12 @@ func RunTests(dir string, logger func(...any), timeout time.Duration) error {
 	case <-done:
 		// Execution completed
 	case <-ctx.Done():
-		return fmt.Errorf("test execution timed out after %v in directory %s", timeout, dir)
+		return fmt.Errorf("⏰💥 TIMEOUT ERROR: Test execution timed out after %v in directory %s\n🔴 This usually means the WebAssembly tests are hanging or taking too long\n💡 Try increasing the timeout or check for infinite loops in your tests", timeout, dir)
 	}
 
 	// Analyze results from progress messages
 	if len(messages) == 0 {
-		return fmt.Errorf("no progress messages received - possible test execution failure in directory %s", dir)
+		return fmt.Errorf("❌💥 NO OUTPUT: No progress messages received from test execution in directory %s\n🔴 This indicates a serious problem with the test runner\n💡 Check that wasmbrowsertest is properly installed and accessible", dir)
 	}
 
 	// Check for errors in output
@@ -120,7 +143,16 @@ func RunTests(dir string, logger func(...any), timeout time.Duration) error {
 		if errorSummary == "" {
 			errorSummary = "unknown error occurred during test execution"
 		}
-		return fmt.Errorf("WebAssembly test execution failed in directory %s: %s", dir, errorSummary)
+
+		errorMsg := fmt.Sprintf("❌💥 WebAssembly test EXECUTION FAILED in directory %s\n🔴 Error: %s", dir, errorSummary)
+
+		// Add information about failing tests if any were found
+		if len(failedTests) > 0 {
+			errorMsg += fmt.Sprintf("\n🧪 Failing Tests: %s", strings.Join(failedTests, ", "))
+		}
+
+		errorMsg += "\n💡 Check the test output above for detailed failure information"
+		return fmt.Errorf("%s", errorMsg)
 	}
 
 	if len(lastMessage) >= 2 {
@@ -130,7 +162,16 @@ func RunTests(dir string, logger func(...any), timeout time.Duration) error {
 				if len(lastMessage) > 2 {
 					errorDetail = fmt.Sprintf("%v", lastMessage[2])
 				}
-				return fmt.Errorf("WebAssembly tests failed in directory %s: %s", dir, errorDetail)
+
+				errorMsg := fmt.Sprintf("❌💥 WebAssembly tests FAILED in directory %s\n🔴 Exit Error: %s", dir, errorDetail)
+
+				// Add information about failing tests if any were found
+				if len(failedTests) > 0 {
+					errorMsg += fmt.Sprintf("\n🧪 Failing Tests: %s", strings.Join(failedTests, ", "))
+				}
+
+				errorMsg += "\n💡 The test process exited with an error status"
+				return fmt.Errorf("%s", errorMsg)
 			} else if lastMessage[1] == "ok" {
 				// Check for PASS in output to confirm success
 				foundPass := false
@@ -146,22 +187,32 @@ func RunTests(dir string, logger func(...any), timeout time.Duration) error {
 				if foundPass {
 					return nil // Success
 				}
-				return fmt.Errorf("tests completed in directory %s but no PASS found in output - check test implementation", dir)
+
+				errorMsg := fmt.Sprintf("⚠️💥 PARTIAL SUCCESS: Tests completed in directory %s but no PASS found in output", dir)
+
+				// Add information about failing tests if any were found
+				if len(failedTests) > 0 {
+					errorMsg += fmt.Sprintf("\n🧪 Failing Tests: %s", strings.Join(failedTests, ", "))
+				}
+
+				errorMsg += "\n🔴 This usually means your tests are not producing the expected output\n💡 Check that your test functions are named correctly (TestXxx) and contain proper assertions"
+				return fmt.Errorf("%s", errorMsg)
 			}
 		}
 	}
 
 	// If we reach here, something unexpected happened
 	var debugInfo strings.Builder
-	debugInfo.WriteString(fmt.Sprintf("unexpected test execution result in directory %s\n", dir))
-	debugInfo.WriteString(fmt.Sprintf("Total messages received: %d\n", len(messages)))
+	debugInfo.WriteString(fmt.Sprintf("❌💥 UNEXPECTED ERROR: Test execution issue in directory %s\n", dir))
+	debugInfo.WriteString(fmt.Sprintf("🔴 Total messages received: %d\n", len(messages)))
 	if len(lastMessage) > 0 {
-		debugInfo.WriteString(fmt.Sprintf("Last message: %v\n", lastMessage))
+		debugInfo.WriteString(fmt.Sprintf("🔴 Last message: %v\n", lastMessage))
 	}
-	debugInfo.WriteString("All messages:\n")
+	debugInfo.WriteString("📋 All messages received:\n")
 	for i, msg := range messages {
 		debugInfo.WriteString(fmt.Sprintf("  %d: %v\n", i+1, msg))
 	}
+	debugInfo.WriteString("💡 This usually indicates a problem with the test runner or environment setup")
 
-	return fmt.Errorf("WebAssembly test execution issue in directory %s:\n%s", dir, debugInfo.String())
+	return fmt.Errorf("%s", debugInfo.String())
 }
