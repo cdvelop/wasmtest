@@ -16,13 +16,50 @@ Built for developers writing Go code that interacts with the browser DOM, JavaSc
    import "github.com/cdvelop/wasmtest"
    ```
 
-3. WasmTest automatically ensures the underlying `wasmbrowsertest` binary (or `go_js_wasm_exec`) is installed via `go install github.com/agnivade/wasmbrowsertest@latest` when you create an instance with [`New`](wasmtest.go). No manual setup needed, though you can call [`EnsureWasmBrowserTestInstalled`](wasmtest.go:46) explicitly if desired.
+3. WasmTest automatically ensures the underlying `wasmbrowsertest` binary (or `go_js_wasm_exec`) is installed via `go install github.com/agnivade/wasmbrowsertest@latest` when you create an instance with [`New`](wasmtest.go). No manual setup needed, though you can call [`ensureWasmBrowserTestInstalled`](wasmtest.go:46) explicitly if desired.
 
    The binary will be placed in `$GOPATH/bin` or `$GOBIN`. Ensure this directory is in your `$PATH`.
 
+> This library does not add additional indirect dependencies to your module's `go.mod`.
+
 ## Basic Usage
 
-Create a `Wasmtest` instance with a logger (optional, defaults to `println`), then call [`Execute`](wasmtest.go) with a progress callback to run tests. Set environment variables `GOOS=js GOARCH=wasm` before running tests.
+### Simplified API (Recommended)
+
+For most use cases, use the ultra-simple [`RunTests`](wasmtest.go) function.
+
+Below is the actual demo test used in this repository (`RunTestsDemo_test.go`). It
+shows the minimal call pattern the library expects. The repository also contains a
+`./example` folder with the WebAssembly test code — see [`./example/dom_test.go`](./example/dom_test.go) for the source files
+and test harness.
+
+```go
+package wasmtest_test
+
+import (
+	. "github.com/cdvelop/wasmtest"
+	"testing"
+	"time"
+)
+
+// RunTestsDemo tests the simplified RunTests API by running tests in the example directory
+func RunTestsDemo(t *testing.T) {
+	// Test the simplified RunTests API - ultra simple!
+	if err := RunTests("./example", nil, 10*time.Minute); err != nil {
+		t.Errorf("RunTests failed: %v", err)
+	}
+}
+```
+
+- [`RunTests`](wasmtest.go)(dir, logger, timeout): Runs WebAssembly tests in the specified directory
+- `dir`: Path to directory containing test files (e.g., `"./example"`). If `dir` is empty `""` or `"."`,
+  `RunTests` will default to the `wasm_test` directory.
+- `logger`: Optional logger function (pass `nil` for no logging)
+- `timeout`: Maximum time to wait for tests to complete
+
+### Advanced Usage
+
+For more control, use the lower-level API:
 
 ```go
 package main
@@ -73,9 +110,6 @@ func main() {
 
 For full API details, see [wasmtest.go](wasmtest.go).
 
-## Examples
-
-See [docs/examples.md](docs/examples.md) for integration tests, WASM test code snippets (math, DOM, JS interop), and demo command.
 
 ## Advanced Usage
 

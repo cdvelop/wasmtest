@@ -124,8 +124,8 @@ func (w *Wasmtest) ensureWasmExecSymlink(progress func(msgs ...any)) error {
 
 	// Check if wasmbrowsertest exists
 	if _, err := os.Stat(wasmBrowserTest); os.IsNotExist(err) {
-		if w.Log != nil {
-			w.Log("wasmbrowsertest not found, automatic installation may be in progress")
+		if w.log != nil {
+			w.log("wasmbrowsertest not found, automatic installation may be in progress")
 		}
 		progress("warning", "wasmbrowsertest not found, tests may fail if not installed")
 		return nil // Don't fail, let the test try anyway

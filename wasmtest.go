@@ -10,7 +10,7 @@ import (
 type Wasmtest struct {
 	// Log is a simple logger function provided by the caller.
 	// It should accept variadic values similar to fmt.Println.
-	Log func(...any)
+	log func(...any)
 	// mutex to protect lastOpID
 	lastOpID string
 }
@@ -25,7 +25,7 @@ func New(logger func(...any)) *Wasmtest {
 		}
 	}
 
-	w := &Wasmtest{Log: logger}
+	w := &Wasmtest{log: logger}
 
 	// Perform a synchronous verification/install of wasmbrowsertest so callers
 	// (and integrations like TUI) don't need to call it explicitly.
@@ -36,14 +36,14 @@ func New(logger func(...any)) *Wasmtest {
 		defer cancel()
 		if err := w.ensureWasmBrowserTestInstalled(ctx); err != nil {
 			// Log the error via provided logger
-			w.Log("ensure wasmbrowsertest failed:", err)
+			w.log("ensure wasmbrowsertest failed:", err)
 		}
 	}()
 
 	return w
 }
 
-// EnsureWasmBrowserTestInstalled verifies that a binary named
+// ensureWasmBrowserTestInstalled verifies that a binary named
 // `wasmbrowsertest` (or `go_js_wasm_exec`) is available in PATH. If not
 // present it will attempt to install `github.com/agnivade/wasmbrowsertest@latest`
 // using `go install`. Errors are returned and also reported through the
@@ -59,12 +59,12 @@ func (w *Wasmtest) ensureWasmBrowserTestInstalled(ctx context.Context) error {
 
 	for _, p := range probes {
 		if _, err := exec.LookPath(p); err == nil {
-			w.Log("found", p)
+			w.log("found", p)
 			return nil
 		}
 	}
 
-	w.Log("wasmbrowsertest not found in PATH; attempting to install via go install")
+	w.log("wasmbrowsertest not found in PATH; attempting to install via go install")
 
 	// Prepare install command with a timeout to avoid hanging indefinitely.
 	// Use the module path from the docs.
@@ -78,42 +78,28 @@ func (w *Wasmtest) ensureWasmBrowserTestInstalled(ctx context.Context) error {
 	select {
 	case err := <-done:
 		if err != nil {
-			w.Log("go install failed:", err)
+			w.log("go install failed:", err)
 			return err
 		}
 	case <-ctx.Done():
 		// kill process if still running
 		_ = installCmd.Process.Kill()
-		w.Log("installation context cancelled or deadline exceeded:", ctx.Err())
+		w.log("installation context cancelled or deadline exceeded:", ctx.Err())
 		return ctx.Err()
 	case <-time.After(2 * time.Minute):
 		_ = installCmd.Process.Kill()
-		w.Log("installation timed out")
+		w.log("installation timed out")
 		return errors.New("wasmtest: go install timed out")
 	}
 
 	// After install, re-check PATH
 	for _, p := range probes {
 		if _, err := exec.LookPath(p); err == nil {
-			w.Log("installed and found", p)
+			w.log("installed and found", p)
 			return nil
 		}
 	}
 
-	w.Log("installed but binary still not found in PATH; ensure GOBIN or GOPATH/bin is on PATH")
+	w.log("installed but binary still not found in PATH; ensure GOBIN or GOPATH/bin is on PATH")
 	return errors.New("wasmtest: installed but binary not found in PATH")
 }
-
-/*
-Example usage:
-
-    logger := func(v ...any) { fmt.Println(v...) }
-    w := New(logger)
-    ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-    defer cancel()
-    if err := w.EnsureWasmBrowserTestInstalled(ctx); err != nil {
-        // handle error
-    }
-
-Note: the example above requires importing fmt, context and time in the caller.
-*/
