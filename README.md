@@ -126,6 +126,8 @@ See [docs/troubleshooting.md](docs/troubleshooting.md) for installation issues, 
 
 For underlying tool details, see [docs/wasmbrowsertest.md](docs/wasmbrowsertest.md).
 
+## [Contributing](https://github.com/cdvelop/cdvelop/blob/main/CONTRIBUTING.md)
+
 ## License
 
 [MIT](LICENSE).
